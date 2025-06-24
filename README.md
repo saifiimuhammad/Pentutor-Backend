@@ -1,50 +1,44 @@
-# Pentutor Backend
+# Django Backend for React + Vite Frontend
 
-This is the backend service for **Pentutor**, an advanced tutoring and mentorship platform tailored for programming, cybersecurity, and tech education.
+This folder (`main/backend/`) contains the Django backend for the React + Vite frontend.
 
-It powers all core backend operations including authentication, user management, scheduling, messaging, and admin dashboard functionalities.
+## Completed Setup
+
+### Folder Structure
+- Frontend: `main/frontend/`
+- Backend: `main/backend/`
+
+### Project Setup
+- Initialized Django project (`config`)
+- Created virtual environment
+- Installed necessary packages:
+  - `django`
+  - `djangorestframework`
+  - `django-cors-headers`
+  - `djangorestframework-simplejwt` (for JWT-based auth)
+
+### Authentication
+- Implemented JWT-based login using cookies
+- On successful login:
+  - `access` and `refresh` tokens are stored in **HTTP-only cookies**
+- Example API endpoint created:
+  - `POST /api/login/` – authenticates user and sets cookies
+
+### CORS Configuration
+- Enabled CORS to allow frontend access:
+  - `http://localhost:5173` (Vite dev server)
+- Allowed credentials to support cookie-based auth
+
+### Models
+- Created custom user model (based on `AbstractUser`) in `core/models.py`
+  - Ready to extend for future fields
 
 ---
 
-## 🌐 API Features
+## How to Run
 
-- 🔐 User Authentication (JWT + OAuth2 ready)
-- 🧑‍🏫 Role-based Access (Admin, Mentor, Student)
-- 📅 Session Booking & Scheduling APIs
-- 💬 Real-time Messaging System (via Channels/WebSockets)
-- 📚 Course, Subject, and Resource APIs
-- 🛡️ Secure Input Validation & Exception Handling
-- 📈 Admin Dashboard Stats and Logs
-
----
-
-## 🛠️ Tech Stack
-
-| Layer       | Tech Stack             |
-|-------------|------------------------|
-| Language    | Python                 |
-| Framework   | Django + Django REST   |
-| Frontend    | React (separate repo)  |
-| Database    | PostgreSQL             |
-| Auth        | JWT (via djangorestframework-simplejwt) |
-| Caching     | Redis (for sessions/chat) |
-| Deployment  | Docker, Heroku / DigitalOcean |
-
----
-
-## 📁 Project Structure
-
-```bash
-pentutor-backend/
-├── pentutor_backend/      # Main Django project (settings, URLs, etc.)
-├── apps/                  # Custom apps (auth, courses, chat, scheduling, etc.)
-│   ├── auth/              # JWT login/register, OAuth, roles
-│   ├── users/             # Mentor/Student profiles
-│   ├── courses/           # Course APIs, content, categories
-│   ├── schedules/         # Booking and calendar logic
-│   ├── chat/              # Messaging, WebSocket handlers
-│   └── dashboard/         # Admin APIs, logs, analytics
-├── config/                # Environment and global settings
-├── requirements.txt       # Python package requirements
-├── manage.py              # Django CLI entry point
-└── Dockerfile             # For containerization
+1. Navigate to `main/backend/`
+2. Create virtual environment and activate:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # Windows: venv\Scripts\activate
