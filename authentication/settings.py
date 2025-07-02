@@ -28,7 +28,15 @@ SECRET_KEY = 'django-insecure-n&d_k(a7pys#0u%j(1(4lcb-#t&a3g*@9vla42_zdsj4rzd^r0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+"448f-43-242-177-73.ngrok-free.app",
+'localhost',
+    '127.0.0.1',
+]
+
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
 
 
 # Application definition
@@ -49,7 +57,9 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.google',
     'allauth.socialaccount.providers.apple',
     'accounts',
-    'meetings'
+    'meetings',
+    'calendersync',
+    'django_celery_beat'
 ]
 
 MIDDLEWARE = [
@@ -97,6 +107,9 @@ DATABASES = {
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
+
+LOGIN_URL = '/api/auth/login/'
+
 
 AUTH_PASSWORD_VALIDATORS = [
     {

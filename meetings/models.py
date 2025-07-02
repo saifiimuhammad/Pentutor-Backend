@@ -25,7 +25,7 @@ class Meeting(models.Model):
     meeting_type = models.CharField(max_length=20, choices=MEETING_TYPES, default='instant')
     is_active = models.BooleanField(default=True)
     status = models.CharField(max_length=20, choices=MEETING_STATUS, default='waiting')
-
+    google_event_id = models.CharField(max_length=255, blank=True, null=True)
 
     # Meeting Settings
     max_participants = models.IntegerField(default=100)

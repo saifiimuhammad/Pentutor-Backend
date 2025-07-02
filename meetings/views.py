@@ -10,6 +10,7 @@ from .serializers import MeetingSerializer, ParticipantSerializer,CreateMeetingS
 import random
 from accounts.models import CustomUser
 from django.utils.text import slugify
+from calendersync.utils import create_google_event
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -43,7 +44,10 @@ def create_meeting(request):
     if data.get('password'):
         meeting.password = data['password']
         meeting.save()
-    
+    print("Running create_google_event")
+    create_google_event(request.user, meeting)
+    print("Done create_google_event")
+
     # Host automatically joins as participant
     participant = Participant.objects.create(
         meeting=meeting,
@@ -56,6 +60,7 @@ def create_meeting(request):
         meeting.start_meeting()
     
     return Response({
+        'google_event_id': meeting.google_event_id,
         'meeting_id': meeting.meeting_id,
         'password': meeting.password,
         'join_url': f'/meeting/join/{meeting.meeting_id}',
