@@ -6,18 +6,22 @@ from google.auth.transport.requests import Request
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.dateparse import parse_datetime
+from django.utils import timezone
+from django.http import JsonResponse
+import datetime
 import logging 
 import uuid
+import requests
 
 from django.conf import settings
 from .models import GoogleCredentials, CalendarEvent
 
-# from django.contrib.auth import get_user_model
-# User = get_user_model()
+from django.contrib.auth import get_user_model
+User = get_user_model()
 
 logger = logging.getLogger(__name__)
 
-# user = User.objects.first()
+user = User.objects.first()
 
 import os
 
@@ -31,6 +35,8 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 
 REDIRECT_URI = "http://localhost:8000/calendar/oauth2callback/"
 ADDRESS = "https://448f-43-242-177-73.ngrok-free.app/calendar/notifications/"
+REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
+STOP_URL = 'https://www.googleapis.com/calendar/v3/channels/stop'
 
 # Views below
 
@@ -78,6 +84,38 @@ def oauth2_callback(request):
     start_watch(user)
     
     return redirect('calendar_events')
+
+@csrf_exempt
+@login_required
+def disconnect_google(request):
+    try:
+        creds = GoogleCredentials.objects.get(user=request.user)
+
+        # Revoke token via Google
+        revoke_url = REVOKE_URL
+        params = {'token': creds.token}
+        requests.post(revoke_url, params=params)
+
+        if creds.channel_id and creds.resource_id:
+            stop_url = STOP_URL
+            headers = {'Content-Type': 'application/json'}
+            data = {
+                'id': creds.channel_id,
+                'resourceId': creds.resource_id
+            }
+            access_token = creds.token
+            requests.post(stop_url, headers={
+                **headers,
+                'Authorization': f'Bearer {access_token}'
+            }, json=data)
+
+        # Delete from DB
+        creds.delete()
+
+        return JsonResponse({'success': True, 'message': 'Google account disconnected.'})
+
+    except GoogleCredentials.DoesNotExist:
+        return JsonResponse({'error': 'No credentials found.'}, status=404)
 
 def calendar_events(request):
     creds_obj = GoogleCredentials.objects.get(user=request.user)
@@ -202,6 +240,14 @@ def start_watch(user):
     }
 
     response = service.events().watch(calendarId='primary', body=request_body).execute()
+
+    expiration_timestamp = int(response.get('expiration')) / 1000  
+    expiration_time = timezone.datetime.fromtimestamp(expiration_timestamp, tz=timezone.utc)
+
+    creds_obj.channel_id = response.get('id')
+    creds_obj.resource_id = response.get('resourceId')
+    creds_obj.expiration = expiration_time
+    creds_obj.save()
     print("Watch response:", response)
 
     # ✅ Save the channel ID + resource ID returned by Google

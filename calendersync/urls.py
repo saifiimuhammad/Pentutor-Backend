@@ -9,4 +9,5 @@ urlpatterns = [
     path("oauth2callback/", views.oauth2_callback, name="oauth2_callback"),
     path("events", views.calendar_events, name="calendar_events"),
     path('notifications/', views.calendar_notification, name='calendar_notification'),
+    path('disconnect/', views.disconnect_google, name='disconnect_google'),
 ]
