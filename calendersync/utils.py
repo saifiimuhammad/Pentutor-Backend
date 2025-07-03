@@ -5,6 +5,7 @@ from django.utils.timezone import is_naive, make_aware
 from meetings.models import Meeting 
 import pytz
 
+
 def create_google_event(user, meeting):
     try:
         creds_obj = GoogleCredentials.objects.get(user=user)
@@ -51,3 +52,6 @@ def create_google_event(user, meeting):
     real_meeting = Meeting.objects.get(id=meeting.id)
     real_meeting.google_event_id = created_event['id']
     real_meeting.save()
+
+
+
