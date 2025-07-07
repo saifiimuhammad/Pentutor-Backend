@@ -25,6 +25,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-n&d_k(a7pys#0u%j(1(4lcb-#t&a3g*@9vla42_zdsj4rzd^r0'
 
+# JazzCash 
+MERCHANT_ID = 'YOUR_MERCHANT_ID'
+API_PASSWORD = 'YOUR_API_PASSWORD'
+INTEGRITY_SALT = 'YOUR_INTEGRITY_SALT'
+PAYMENT_API_URL = 'https://sandbox.jazzcash.com.pk/CustomerPortal/transactionmanagement/merchantform/' 
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
@@ -147,6 +153,8 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
 
 # REST Framework Configuration
 REST_FRAMEWORK = {
