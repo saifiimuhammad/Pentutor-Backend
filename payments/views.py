@@ -1,42 +1,84 @@
-import requests
-from django.conf import settings
-from django.http import JsonResponse, HttpResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.utils import timezone
- 
-from .utils import generate_secure_hash
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from .jazzcash import generate_jazzcash_url
+from .easypaisa import generate_easypaisa_url
+
+from .models import Payment
+from meetings.models import Meeting
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def initiate_jazzcash(request):
+    meeting_id = request.data.get("meeting_id")
+    amount = float(request.data.get("amount", 0))
+    user = request.user
+
+    meeting = Meeting.objects.get(id=meeting_id)
+    payment_url, txn_ref = generate_jazzcash_url(user, meeting_id, amount)
+
+    Payment.objects.create(
+        user=user,
+        meeting=meeting,
+        amount=amount,
+        txn_ref=txn_ref,
+        gateway="jazzcash",
+    )
+
+    return Response({"payment_url": payment_url})
+
+@api_view(['GET'])
+def verify_jazzcash(request):
+    txn_ref = request.GET.get("pp_TxnRefNo")
+    status = request.GET.get("pp_ResponseCode")
+
+    try:
+        payment = Payment.objects.get(txn_ref=txn_ref)
+        if status == "000":
+            payment.is_successful = True
+            payment.save()
+            return Response({"status": "success"})
+        else:
+            return Response({"status": "failed"})
+    except Payment.DoesNotExist:
+        return Response({"error": "Transaction not found"}, status=404)
 
 
 
-def initiate_payment(request):
-    payload = {
-        "pp_Version": "1.1",
-        "pp_TxnType": "MWALLET",
-        "pp_Language": "EN",
-        "pp_MerchantID": settings.MERCHANT_ID,
-        "pp_Password": settings.API_PASSWORD,
-        "pp_TxnRefNo": "T" + timezone.now().strftime('%Y%m%d%H%M%S'),
-        "pp_Amount": "1000",  # 1000 PKR = 10.00
-        "pp_TxnDateTime": timezone.now().strftime('%Y%m%d%H%M%S'),
-        "pp_BillReference": "invoice001",
-        "pp_Description": "Payment for order",
-        "pp_ReturnURL": "https://yourdomain.com/payment/response/",
-    }
-    
-    # Hash it
-    payload["pp_SecureHash"] = generate_secure_hash(payload, settings.INTEGRITY_SALT)
 
-    response = requests.post(settings.PAYMENT_API_URL, data=payload)
-    return JsonResponse(response.json())
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def initiate_easypaisa(request):
+    meeting_id = request.data.get("meeting_id")
+    amount = float(request.data.get("amount", 0))
+    user = request.user
 
+    meeting = Meeting.objects.get(id=meeting_id)
+    payment_url, txn_ref = generate_easypaisa_url(user, meeting_id, amount)
 
-@csrf_exempt
-def payment_response(request):
-    data = request.POST.dict()
-    received_hash = data.pop("pp_SecureHash")
+    Payment.objects.create(
+        user=user,
+        meeting=meeting,
+        amount=amount,
+        txn_ref=txn_ref,
+        gateway="easypaisa",
+    )
 
-    calculated_hash = generate_secure_hash(data, settings.INTEGRITY_SALT)
+    return Response({"payment_url": payment_url})
 
-    if calculated_hash == received_hash and data["pp_ResponseCode"] == "000":
-        return HttpResponse("Payment Successful")
-    return HttpResponse("Payment Failed")
+@api_view(['GET'])
+def verify_easypaisa(request):
+    txn_ref = request.GET.get("orderRefNum")
+    status = request.GET.get("paymentStatus")  
+
+    try:
+        payment = Payment.objects.get(txn_ref=txn_ref)
+        if status == "SUCCESS":
+            payment.is_successful = True
+            payment.save()
+            return Response({"status": "success"})
+        else:
+            return Response({"status": "failed"})
+    except Payment.DoesNotExist:
+        return Response({"error": "Transaction not found"}, status=404)

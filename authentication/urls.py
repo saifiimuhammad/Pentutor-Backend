@@ -25,7 +25,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
      path('api/auth/', include('accounts.urls')),
      path('api/meetings/', include('meetings.urls')),
-     path('calendar/', include('calendersync.urls')),
+     path('api/calendar/', include('calendersync.urls')),
+     path('api/payments/', include('payments.urls')),
      path('api/alerts/', include('alerts.urls')),
 
 ]
