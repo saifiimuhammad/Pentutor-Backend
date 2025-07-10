@@ -26,6 +26,7 @@ urlpatterns = [
      path('api/auth/', include('accounts.urls')),
      path('api/meetings/', include('meetings.urls')),
      path('calendar/', include('calendersync.urls')),
+     path('api/alerts/', include('alerts.urls')),
 
 ]
 if settings.DEBUG:

@@ -7,8 +7,6 @@ from django.utils import timezone
 from .utils import generate_secure_hash
 
 
-# Create your views here.
-
 
 def initiate_payment(request):
     payload = {

@@ -62,10 +62,11 @@ INSTALLED_APPS = [
     'allauth.socialaccount',
     'allauth.socialaccount.providers.google',
     'allauth.socialaccount.providers.apple',
+    'django_celery_beat',
     'accounts',
     'meetings',
     'calendersync',
-    'django_celery_beat'
+    'alerts'
 ]
 
 MIDDLEWARE = [
