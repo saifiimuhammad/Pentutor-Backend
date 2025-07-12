@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -11,6 +12,8 @@ import random
 from accounts.models import CustomUser
 from django.utils.text import slugify
 from calendersync.utils import create_google_event
+from .utils.recorder import start_recording_to_db  
+from django.http import HttpResponse
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -40,15 +43,14 @@ def create_meeting(request):
         enable_reactions=data.get('enable_reactions', True)
     )
     
-    # Set custom password if provided
     if data.get('password'):
         meeting.password = data['password']
         meeting.save()
+
     print("Running create_google_event")
     create_google_event(request.user, meeting)
     print("Done create_google_event")
 
-    # Host automatically joins as participant
     participant = Participant.objects.create(
         meeting=meeting,
         user=request.user,
@@ -58,6 +60,11 @@ def create_meeting(request):
     # Start meeting if instant
     if meeting.meeting_type == 'instant':
         meeting.start_meeting()
+
+        # Save recording as binary in DB
+        start_recording_to_db(meeting) 
+        meeting.is_recording = True
+        meeting.save()
     
     return Response({
         'google_event_id': meeting.google_event_id,
@@ -69,7 +76,6 @@ def create_meeting(request):
         'participant': ParticipantSerializer(participant).data,
         'message': 'Meeting created successfully'
     }, status=status.HTTP_201_CREATED)
-
 @api_view(['POST'])
 @permission_classes([])
 def join_meeting(request, meeting_id):
@@ -264,3 +270,12 @@ def get_meeting_participants(request, meeting_id):
         return Response({
             'error': 'Meeting not found'
         }, status=status.HTTP_404_NOT_FOUND)
+
+
+def download_recording(request, meeting_id):
+    meeting = Meeting.objects.get(id=meeting_id)
+    if meeting.recording_data:
+        return HttpResponse(meeting.recording_data, content_type="video/mp4")
+    return HttpResponse("No recording found.", status=404)
+
+

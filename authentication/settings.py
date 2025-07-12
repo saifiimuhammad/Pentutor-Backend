@@ -66,7 +66,9 @@ INSTALLED_APPS = [
     'accounts',
     'meetings',
     'calendersync',
-    'alerts'
+    'payments',
+    'alerts',
+    'whiteboard'
 ]
 
 MIDDLEWARE = [
