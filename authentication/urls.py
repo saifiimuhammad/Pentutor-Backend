@@ -28,6 +28,7 @@ urlpatterns = [
      path('api/calendar/', include('calendersync.urls')),
      path('api/payments/', include('payments.urls')),
      path('api/alerts/', include('alerts.urls')),
+     path('api/jobs/', include('jobboard.urls')),
 
 ]
 if settings.DEBUG:
