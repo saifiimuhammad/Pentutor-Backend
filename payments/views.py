@@ -7,8 +7,10 @@ from .easypaisa import generate_easypaisa_url
 
 from .models import Payment
 from meetings.models import Meeting
+from .utils import activate_tutor_plan
 
-@api_view(['POST'])
+
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def initiate_jazzcash(request):
     meeting_id = request.data.get("meeting_id")
@@ -28,16 +30,25 @@ def initiate_jazzcash(request):
 
     return Response({"payment_url": payment_url})
 
-@api_view(['GET'])
+
+@api_view(["GET"])
 def verify_jazzcash(request):
     txn_ref = request.GET.get("pp_TxnRefNo")
     status = request.GET.get("pp_ResponseCode")
+    plan = "FREE"
 
     try:
         payment = Payment.objects.get(txn_ref=txn_ref)
         if status == "000":
             payment.is_successful = True
             payment.save()
+
+            if payment.amount == 300:
+                plan = "BASIC"
+            elif payment.amount == 1500:
+                plan = "PREMIUM"
+
+            activate_tutor_plan(user=request.user, payment=payment, plan_type=plan)
             return Response({"status": "success"})
         else:
             return Response({"status": "failed"})
@@ -45,9 +56,7 @@ def verify_jazzcash(request):
         return Response({"error": "Transaction not found"}, status=404)
 
 
-
-
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def initiate_easypaisa(request):
     meeting_id = request.data.get("meeting_id")
@@ -67,16 +76,25 @@ def initiate_easypaisa(request):
 
     return Response({"payment_url": payment_url})
 
-@api_view(['GET'])
+
+@api_view(["GET"])
 def verify_easypaisa(request):
     txn_ref = request.GET.get("orderRefNum")
-    status = request.GET.get("paymentStatus")  
+    status = request.GET.get("paymentStatus")
 
     try:
         payment = Payment.objects.get(txn_ref=txn_ref)
         if status == "SUCCESS":
             payment.is_successful = True
             payment.save()
+
+            if payment.amount == 300:
+                plan = "BASIC"
+            elif payment.amount == 1500:
+                plan = "PREMIUM"
+
+            activate_tutor_plan(user=request.user, payment=payment, plan_type=plan)
+
             return Response({"status": "success"})
         else:
             return Response({"status": "failed"})

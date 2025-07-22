@@ -1,8 +1,9 @@
 from django.apps import AppConfig
 
+
 class CalendersyncConfig(AppConfig):
-    default_auto_field = 'django.db.models.BigAutoField'
-    name = 'calendersync'
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "calendersync"
 
     def ready(self):
         from django_celery_beat.models import PeriodicTask, IntervalSchedule
@@ -24,3 +25,4 @@ class CalendersyncConfig(AppConfig):
                 'kwargs': json.dumps({}),
             }
         )
+        
