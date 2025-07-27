@@ -45,14 +45,26 @@ class JobPost(models.Model):
         ("group", "Group"),
     ]
 
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("approved", "Approved"),
+        ("blocked", "Blocked"),
+    ]
+
     title = models.CharField(max_length=200, null=True, blank=True)
     description = models.TextField(null=True, blank=True)
     city = models.CharField(max_length=100, null=True, blank=True)
-    student = models.ForeignKey("StudentProfile", on_delete=models.CASCADE)
-    employer = models.ForeignKey("EmployerProfile", on_delete=models.CASCADE)
+    location = models.CharField(max_length=100, null=True, blank=True)
+    student = models.ForeignKey(
+        "StudentProfile", on_delete=models.CASCADE, null=True, blank=True
+    )
+    employer = models.ForeignKey(
+        "EmployerProfile", on_delete=models.CASCADE, null=True, blank=True
+    )
+
     expires_at = models.DateTimeField(null=True, blank=True)
     subjects = models.ManyToManyField(Subject)
-
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
 
     # New fields
@@ -87,6 +99,7 @@ class JobPost(models.Model):
 
 class TutorProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
+    is_active = models.BooleanField(default=True)
     otp_code = models.CharField(max_length=6, null=True, blank=True)
     saved_jobs = models.ManyToManyField(JobPost, blank=True, related_name="saved_by")
     cnic = models.CharField(max_length=15, null=True, blank=True)
@@ -156,6 +169,7 @@ class TutorPayment(models.Model):
 
 class StudentProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
+    is_active = models.BooleanField(default=True)
     name = models.CharField(max_length=100, null=True, blank=True)
     email = models.EmailField(null=True, blank=True)
     phone = models.CharField(max_length=20, null=True, blank=True)
@@ -196,6 +210,7 @@ class Application(models.Model):
         ("pending", "Pending"),
         ("accepted", "Accepted"),
         ("rejected", "Rejected"),
+        ("withdrawn", "Withdrawn"),
     ]
 
     job = models.ForeignKey(JobPost, on_delete=models.CASCADE)
@@ -204,6 +219,7 @@ class Application(models.Model):
     status = models.CharField(max_length=10, choices=CHOICES, default="pending")
     applied_at = models.DateTimeField(auto_now_add=True)
     timestamp = models.DateTimeField(auto_now=True)
+    status_history = models.JSONField(default=list, blank=True)
 
 
 class ScheduledClass(models.Model):
@@ -271,11 +287,31 @@ class ContactMessage(models.Model):
 
 
 class EmployerProfile(models.Model):
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("approved", "Approved"),
+        ("rejected", "Rejected"),
+    ]
+
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     company_name = models.CharField(max_length=100)
     logo = models.ImageField(upload_to="company_logos/")
     description = models.TextField()
     website = models.URLField(blank=True)
+    is_active = models.BooleanField(default=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
 
     def __str__(self):
         return self.company_name
+
+
+# For user activity and logs
+
+
+class UserActivity(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    action = models.CharField(max_length=255)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.action}"

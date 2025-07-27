@@ -1,6 +1,5 @@
-from django.shortcuts import render
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from django.core.paginator import Paginator
 from django.db.models import Q
@@ -9,7 +8,9 @@ from django.core.mail import send_mail
 from django.utils.crypto import get_random_string
 from datetime import date
 from django.shortcuts import get_object_or_404
+from rest_framework import status
 
+from .helper import log_activity
 from .models import (
     StudentProfile,
     JobPost,
@@ -18,8 +19,13 @@ from .models import (
     ContactMessage,
     Subject,
     EmployerProfile,
+    UserActivity,
 )
-from .serializers import ApplicationSerializer, EmployerProfileSerializer
+from .serializers import (
+    ApplicationSerializer,
+    EmployerSerializer,
+    JobPostSerializer,
+)
 
 
 HOST_EMAIL = "muhammadsaifarain786@gmail.com"
@@ -83,6 +89,7 @@ def create_job(request):
         if subject_ids:
             job.subjects.set(subject_ids)
 
+        log_activity(request.user, f"Created a job {job.pk}")
         return Response(
             {"success": True, "message": "Job posted successfully", "job_id": job.id}
         )
@@ -128,6 +135,7 @@ def update_job(request, job_id):
             job.subjects.set(data["subjects"])
 
         job.save()
+        log_activity(request.user, f"Updated a job {job_id}")
         return Response({"success": True, "message": "Job updated successfully"})
 
     except JobPost.DoesNotExist:
@@ -149,6 +157,7 @@ def delete_job(request, job_id):
             return Response({"success": False, "message": "Unauthorized"}, status=403)
 
         job.delete()
+        log_activity(request.user, f"Job a deleted {job_id}")
         return Response({"success": True, "message": "Job deleted successfully"})
 
     except JobPost.DoesNotExist:
@@ -177,7 +186,7 @@ def set_job_expiration(request, job_id):
 
         job.expires_at = expiration_date
         job.save()
-
+        log_activity(request.user, f"Set job expiration date {job_id}")
         return Response({"success": True, "message": "Expiration date set"})
 
     except JobPost.DoesNotExist:
@@ -201,7 +210,7 @@ def get_jobs_by_status(request):
     else:
         return Response({"success": False, "message": "Invalid status"})
 
-    return Response({"success": True, "jobs": jobs})
+    return Response({"success": True, "jobs": JobPostSerializer(jobs, many=True).data})
 
 
 @api_view(["POST"])
@@ -218,16 +227,19 @@ def toggle_save_job(request, job_id):
 
     if job in profile.saved_jobs.all():
         profile.saved_jobs.remove(job)
+        log_activity(request.user, f"Saved a job {job_id}")
         return Response({"success": True, "message": "Job unsaved."})
     else:
         profile.saved_jobs.add(job)
+        log_activity(request.user, f"Unsaved a job {job_id}")
         return Response({"success": True, "message": "Job saved."})
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def view_saved_jobs(request):
-    saved_jobs = request.user.saved_jobs.all()  # Assuming ManyToManyField in User model
+    profile = TutorProfile.objects.get(user=request.user)
+    saved_jobs = profile.saved_jobs.all()  # Assuming ManyToManyField in User model
     data = [
         {
             "id": job.id,
@@ -243,7 +255,8 @@ def view_saved_jobs(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def view_applied_jobs(request):
-    applications = Application.objects.filter(applicant=request.user)
+    profile = TutorProfile.objects.get(user=request.user)
+    applications = Application.objects.filter(tutor=profile)
     data = [
         {
             "job_id": app.job.id,
@@ -260,27 +273,27 @@ def view_applied_jobs(request):
 @permission_classes([IsAuthenticated])
 def track_application_history(request, application_id):
     try:
-        application = Application.objects.get(id=application_id, applicant=request.user)
-        history = (
-            application.status_history.all()
-        )  # Assuming related model with status + timestamp
+        # Use tutor instead of applicant (based on your model)
+        application = Application.objects.get(
+            id=application_id, tutor__user=request.user
+        )
 
-        data = [
-            {
-                "status": record.status,
-                "timestamp": record.timestamp,
-                "note": record.note,
-            }
-            for record in history.order_by("-timestamp")
-        ]
+        # status_history is a list of dicts, e.g., [{"status": "pending", "timestamp": "...", "note": "..."}]
+        history = application.status_history
+
+        # Sort by timestamp (assuming it's in ISO format)
+        sorted_history = sorted(
+            history, key=lambda x: x.get("timestamp", ""), reverse=True
+        )
 
         return Response(
             {
                 "success": True,
                 "application_id": application.id,
-                "job_title": application.job.title,
-                "history": data,
-            }
+                "job_title": application.job.title if application.job else None,
+                "history": sorted_history,
+            },
+            status=200,
         )
 
     except Application.DoesNotExist:
@@ -293,7 +306,9 @@ def track_application_history(request, application_id):
 @permission_classes([IsAuthenticated])
 def withdraw_application(request, application_id):
     try:
-        application = Application.objects.get(id=application_id, user=request.user)
+        application = Application.objects.get(
+            id=application_id, tutor__user=request.user
+        )
 
         if application.status == "withdrawn":
             return Response(
@@ -303,6 +318,7 @@ def withdraw_application(request, application_id):
         application.status = "withdrawn"
         application.save()
 
+        log_activity(request.user, f"Withdrawn application {application_id}")
         return Response(
             {"success": True, "message": "Application withdrawn successfully."}
         )
@@ -359,7 +375,8 @@ def job_list(request):
                     "city": job.city,
                     "job_type": job.job_type,
                     "subjects": [s.name for s in job.subjects.all()],
-                    "student": job.student.user.username,
+                    "student": job.student.user.username if job.student else None,
+                    "employer": job.employer.user.username if job.employer else None,
                     "created_at": job.created_at.strftime("%Y-%m-%d %H:%M"),
                     "study_mode": job.study_mode,
                 }
@@ -395,6 +412,7 @@ def apply_job(request, job_id):
         serializer = ApplicationSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(job=job, tutor=tutor_profile)
+            log_activity(request.user, f"Applied to a Job post {job_id}")
             return Response(
                 {
                     "success": True,
@@ -508,7 +526,7 @@ def update_application_status(request, application_id):
 
         application.status = new_status
         application.save()
-
+        log_activity(request.user, f"Application {new_status}.")
         return Response({"success": True, "message": f"Application {new_status}."})
 
     except Application.DoesNotExist:
@@ -527,7 +545,8 @@ def update_application_status(request, application_id):
 def view_application_statuses(request):
     try:
         # Get all job applications for the current user
-        applications = Application.objects.filter(user=request.user)
+        profile = TutorProfile.objects.get(user=request.user)
+        applications = Application.objects.filter(tutor=profile)
 
         serializer = ApplicationSerializer(applications, many=True)
 
@@ -538,17 +557,33 @@ def view_application_statuses(request):
 
 
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def get_registered_tutors(request):
     try:
-        tutors = TutorProfile.objects.select_related("payment").all()
+        # Fetch tutors and prefetch related subjects + user
+        tutors = (
+            TutorProfile.objects.select_related("user")
+            .prefetch_related("subjects")
+            .all()
+        )
 
-        plan_priority = {"premium": 1, "basic": 2, "free": 3}
-        tutors = sorted(tutors, key=lambda t: plan_priority.get(t.payment.plan, 4))
+        # Plan priority based on TutorPayment choices
+        plan_priority = {"PREMIUM": 1, "BASIC": 2, "FREE": 3}
 
+        # Sort tutors by plan (fetching plan from related user.payment_profile)
+        tutors = sorted(
+            tutors,
+            key=lambda t: plan_priority.get(
+                getattr(t.user.payment_profile, "plan", "FREE"), 4
+            ),
+        )
+
+        # Pagination
         page_number = request.GET.get("page", 1)
         paginator = Paginator(tutors, 10)
         page = paginator.get_page(page_number)
 
+        # Prepare data
         data = []
         for tutor in page:
             data.append(
@@ -556,7 +591,7 @@ def get_registered_tutors(request):
                     "username": tutor.user.username,
                     "bio": tutor.bio,
                     "subjects": [s.name for s in tutor.subjects.all()],
-                    "plan": tutor.payment.plan,
+                    "plan": getattr(t.user.payment_profile, "plan", "FREE"),
                 }
             )
 
@@ -566,11 +601,12 @@ def get_registered_tutors(request):
                 "tutors": data,
                 "total_pages": paginator.num_pages,
                 "current_page": page.number,
-            }
+            },
+            status=200,
         )
 
     except Exception as e:
-        return Response({"success": False, "message": str(e)})
+        return Response({"success": False, "message": str(e)}, status=500)
 
 
 @api_view(["GET"])
@@ -626,7 +662,7 @@ def get_in_touch(request):
         ContactMessage.objects.create(
             name=name, email=email, phone=phone, message=message
         )
-
+        log_activity(request.user, "Contacted us")
         return Response({"success": True, "message": "Thanks for contacting us!"})
     except Exception as err:
         return Response(
@@ -640,7 +676,7 @@ def login_tutor(request):
         username = request.data.get("username")
         password = request.data.get("password")
 
-        tutor = TutorProfile.objects.get(username=username)
+        tutor = TutorProfile.objects.get(user__username=username)
         if tutor.user.check_password(password):
             # Generate 6-digit OTP
             otp = get_random_string(length=6, allowed_chars="1234567890")
@@ -681,10 +717,10 @@ def register_tutor(request):
         city = request.data.get("city")
         area = request.data.get("area")
         cnic = request.data.get("cnic")
-        cnic_front = request.data.get("cnic_front")
-        cnic_back = request.data.get("cnic_back")
-        degree_image = request.data.get("degree_image")
-        profile_image = request.data.get("profile_image")
+        cnic_front = request.FILES.get("cnic_front")
+        cnic_back = request.FILES.get("cnic_back")
+        degree_image = request.FILES.get("degree_image")
+        profile_image = request.FILES.get("profile_image")
 
         if (
             not name
@@ -723,6 +759,7 @@ def register_tutor(request):
 
         tutor.save()
 
+        log_activity(request.user, "Tutor registered successfully")
         return Response(
             {
                 "success": True,
@@ -739,45 +776,68 @@ def register_tutor(request):
 
 @api_view(["POST"])
 def verify_otp(request):
-    username = request.data.get("username")
+    user_id = request.data.get("id")
     otp = request.data.get("otp")
+    user_type = request.data.get("user_type")  # "tutor" or "student"
+
+    if not user_id or not otp or not user_type:
+        return Response(
+            {"success": False, "message": "id, otp, and user_type are required"},
+            status=400,
+        )
 
     try:
-        tutor = TutorProfile.objects.get(username=username)
-        if tutor:
+        if user_type == "tutor":
+            tutor = TutorProfile.objects.get(id=user_id)
             if tutor.otp_code == otp:
                 tutor.otp_code = None
                 tutor.save()
+
+                log_activity(request.user, f"OTP verified for Tutor ID {user_id}")
                 return Response(
                     {
                         "success": True,
                         "message": "OTP verified. Login successful.",
                         "tutor": model_to_dict(tutor),
-                    }
+                    },
+                    status=200,
                 )
             else:
-                return Response({"success": False, "message": "Invalid OTP."})
-        else:
-            student = StudentProfile.objects.get(username=username)
+                return Response(
+                    {"success": False, "message": "Invalid OTP."}, status=400
+                )
+
+        elif user_type == "student":
+            student = StudentProfile.objects.get(id=user_id)
             if student.otp_code == otp:
                 student.otp_code = None
                 student.save()
+
+                log_activity(request.user, f"OTP verified for Student ID {user_id}")
                 return Response(
                     {
                         "success": True,
                         "message": "OTP verified. Login successful.",
                         "student": model_to_dict(student),
-                    }
+                    },
+                    status=200,
                 )
             else:
-                return Response({"success": False, "message": "Invalid OTP."})
+                return Response(
+                    {"success": False, "message": "Invalid OTP."}, status=400
+                )
+
+        else:
+            return Response(
+                {"success": False, "message": "Invalid user type"}, status=400
+            )
 
     except TutorProfile.DoesNotExist:
-        return Response({"success": False, "message": "Tutor not found."})
+        return Response({"success": False, "message": "Tutor not found."}, status=404)
     except StudentProfile.DoesNotExist:
-        return Response({"success": False, "message": "Student not found."})
+        return Response({"success": False, "message": "Student not found."}, status=404)
     except Exception as err:
-        return Response({"success": False, "message": str(err)})
+        return Response({"success": False, "message": str(err)}, status=500)
 
 
 @api_view(["GET"])
@@ -805,7 +865,7 @@ def login_student(request):
         username = request.data.get("username")
         password = request.data.get("password")
 
-        student = StudentProfile.objects.get(username=username)
+        student = StudentProfile.objects.get(user__username=username)
         if student.user.check_password(password):
             # Generate 6-digit OTP
             otp = get_random_string(length=6, allowed_chars="1234567890")
@@ -878,6 +938,7 @@ def register_student(request):
         if subject_ids:
             student_profile.subjects.set(Subject.objects.filter(id__in=subject_ids))
 
+        log_activity(request.user, "Student registered successfully")
         return Response(
             {
                 "success": True,
@@ -924,9 +985,10 @@ def create_employer_profile(request):
                 status=400,
             )
 
-        serializer = EmployerProfileSerializer(data=request.data)
+        serializer = EmployerSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(user=request.user)
+            log_activity(request.user, "Employer profile created")
             return Response(
                 {
                     "success": True,
@@ -945,9 +1007,10 @@ def create_employer_profile(request):
 def update_employer_profile(request):
     try:
         profile = EmployerProfile.objects.get(user=request.user)
-        serializer = EmployerProfileSerializer(profile, data=request.data, partial=True)
+        serializer = EmployerSerializer(profile, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
+            log_activity(request.user, "Employer profile updated")
             return Response(
                 {
                     "success": True,
@@ -961,3 +1024,254 @@ def update_employer_profile(request):
         return Response({"success": False, "message": "Profile not found."}, status=404)
     except Exception as e:
         return Response({"success": False, "message": str(e)}, status=500)
+
+
+# @api_view(["PUT"])
+# @permission_classes([IsAuthenticated])
+# def withdraw_application(request, job_id):
+#     try:
+#         tutor_profile = request.user  # Assuming OneToOne field
+#         application = get_object_or_404(Application, job_id=job_id, tutor=tutor_profile)
+
+#         if application.status in ["withdrawn", "rejected"]:
+#             return Response(
+#                 {
+#                     "success": False,
+#                     "error": "Application already withdrawn or rejected.",
+#                 },
+#                 status=400,
+#             )
+
+#         application.status = "withdrawn"
+#         application.save()
+#         log_activity(request.user, "Withdrawn application")
+#         return Response(
+#             {"success": True, "message": "Application withdrawn successfully."}
+#         )
+#     except Exception as err:
+#         return Response({"success": False, "error": str(err)}, status=500)
+
+
+# Admin only APIs
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def view_all_users(request):
+    try:
+        students = StudentProfile.objects.all().values()
+        tutors = TutorProfile.objects.all().values()
+        employers = EmployerProfile.objects.all().values()
+
+        users = {
+            "students": list(students),
+            "tutors": list(tutors),
+            "employers": list(employers),
+        }
+
+        return Response({"success": True, "users": users})
+    except Exception as err:
+        return Response({"success": False, "error": str(err)}, status=500)
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def view_user(request, user_type, user_id):
+    try:
+        model = {
+            "student": StudentProfile,
+            "tutor": TutorProfile,
+            "employer": EmployerProfile,
+        }.get(user_type.lower())
+
+        if not model:
+            return Response(
+                {"success": False, "error": "Invalid user type"}, status=400
+            )
+
+        user = model.objects.get(id=user_id)
+
+        data = {
+            "id": user.id,
+            "username": user.user.username,
+            "email": user.user.email,
+            "is_active": user.user.is_active,
+            "type": user_type.lower(),
+        }
+        return Response({"success": True, "user": data})
+    except model.DoesNotExist:
+        return Response({"success": False, "error": "User not found"}, status=404)
+    except Exception as e:
+        return Response({"success": False, "error": str(e)}, status=500)
+
+
+@api_view(["PUT"])
+@permission_classes([IsAdminUser])
+def edit_user(request, user_type, user_id):
+    try:
+        model = {
+            "student": StudentProfile,
+            "tutor": TutorProfile,
+            "employer": EmployerProfile,
+        }.get(user_type.lower())
+
+        if not model:
+            return Response(
+                {"success": False, "error": "Invalid user type"}, status=400
+            )
+
+        user = model.objects.get(id=user_id)
+
+        username = request.data.get("username")
+        email = request.data.get("email")
+
+        if username:
+            user.user.username = username
+        if email:
+            user.user.email = email
+
+        user.user.save()
+        log_activity(request.user, "User updated")
+        return Response({"success": True, "message": "User updated"})
+    except model.DoesNotExist:
+        return Response({"success": False, "error": "User not found"}, status=404)
+    except Exception as e:
+        return Response({"success": False, "error": str(e)}, status=500)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAdminUser])
+def disable_user(request, user_type, user_id):
+    try:
+        model = {
+            "student": StudentProfile,
+            "tutor": TutorProfile,
+            "employer": EmployerProfile,
+        }.get(user_type.lower())
+
+        if not model:
+            return Response(
+                {"success": False, "error": "Invalid user type"}, status=400
+            )
+
+        user = model.objects.get(id=user_id)
+        user.user.is_active = False
+        user.user.save()
+        log_activity(request.user, "User disabled")
+        return Response({"success": True, "message": "User disabled"})
+    except model.DoesNotExist:
+        return Response({"success": False, "error": "User not found"}, status=404)
+    except Exception as e:
+        return Response({"success": False, "error": str(e)}, status=500)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAdminUser])
+def enable_user(request, user_type, user_id):
+    try:
+        model = {
+            "student": StudentProfile,
+            "tutor": TutorProfile,
+            "employer": EmployerProfile,
+        }.get(user_type.lower())
+
+        if not model:
+            return Response(
+                {"success": False, "error": "Invalid user type"}, status=400
+            )
+
+        user = model.objects.get(id=user_id)
+        user.user.is_active = True
+        user.user.save()
+        log_activity(request.user, "User enabled")
+        return Response({"success": True, "message": "User enabled"})
+    except model.DoesNotExist:
+        return Response({"success": False, "error": "User not found"}, status=404)
+    except Exception as e:
+        return Response({"success": False, "error": str(e)}, status=500)
+
+
+@api_view(["GET", "PUT", "PATCH", "DELETE"])
+@permission_classes([IsAdminUser])
+def admin_jobpost_detail(request, job_id):
+    try:
+        job = JobPost.objects.get(pk=job_id)
+    except JobPost.DoesNotExist:
+        return Response({"success": False, "error": "Job post not found"}, status=404)
+
+    # View Job
+    if request.method == "GET":
+        serializer = JobPostSerializer(job)
+        return Response({"success": True, "job": serializer.data})
+
+    # Update (Edit Job)
+    if request.method == "PUT":
+        serializer = JobPostSerializer(job, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            log_activity(request.user, f"Job post updated! {job.pk}")
+            return Response({"success": True, "job": serializer.data})
+        return Response({"success": False, "errors": serializer.errors}, status=400)
+
+    # Approve or Block
+    if request.method == "PATCH":
+        status_action = request.data.get("status")
+        if status_action in ["approved", "blocked", "pending"]:
+            job.status = status_action
+            job.save()
+            log_activity(
+                request.user, f"{job.pk} Job status updated to {status_action}"
+            )
+            return Response(
+                {"success": True, "message": f"Job status updated to {status_action}"}
+            )
+        return Response({"success": False, "error": "Invalid status"}, status=400)
+
+    # Remove Job
+    if request.method == "DELETE":
+        job.delete()
+        log_activity(request.user, f"{job.pk} Job post deleted successfully")
+        return Response(
+            {"success": True, "message": "Job post deleted successfully"},
+            status=204,
+        )
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAdminUser])
+def approve_reject_employer(request, employer_id):
+    try:
+        employer = EmployerProfile.objects.get(pk=employer_id)
+    except EmployerProfile.DoesNotExist:
+        return Response({"success": False, "error": "Employer not found"}, status=404)
+
+    if request.method == "GET":
+        serializer = EmployerSerializer(employer)
+        return Response({"success": True, "employer": serializer.data}, status=200)
+
+    if request.method == "PATCH":
+        status_action = request.data.get("status")
+        if status_action in ["approved", "rejected", "pending"]:
+            employer.status = status_action
+            employer.save()
+            log_activity(request.user, f"Employer status updated to {status_action}")
+            return Response(
+                {
+                    "success": True,
+                    "message": f"Employer status updated to {status_action}",
+                },
+                status=200,
+            )
+
+        return Response({"success": False, "error": "Invalid status"}, status=400)
+
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def user_activity_list(request):
+    activities = UserActivity.objects.all().order_by("-timestamp")
+    data = [
+        {"user": act.user.username, "action": act.action, "time": act.timestamp}
+        for act in activities
+    ]
+    return Response(data, status=200)

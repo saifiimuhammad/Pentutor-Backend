@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Application, EmployerProfile
+from .models import Application, EmployerProfile, JobPost
 
 
 class ApplicationSerializer(serializers.ModelSerializer):
@@ -9,8 +9,13 @@ class ApplicationSerializer(serializers.ModelSerializer):
         read_only_fields = ["status", "applied_at"]
 
 
-class EmployerProfileSerializer(serializers.ModelSerializer):
+class EmployerSerializer(serializers.ModelSerializer):
     class Meta:
         model = EmployerProfile
         fields = "__all__"
-        read_only_fields = ["user"]
+
+
+class JobPostSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = JobPost
+        fields = "__all__"  # or choose specific fields

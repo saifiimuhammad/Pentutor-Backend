@@ -30,4 +30,10 @@ urlpatterns = [
     path("tutors/all", views.get_registered_tutors, name="get_registered_tutors"),
     path("student/jobs", views.my_jobs, name="my_jobs"),
     path("get_in_touch", views.get_in_touch, name="get_in_touch"),
+    # Admin
+    path(
+        "admin/jobpost/<int:job_id>/",
+        views.admin_jobpost_detail,
+        name="admin-jobpost-detail",
+    ),
 ]
