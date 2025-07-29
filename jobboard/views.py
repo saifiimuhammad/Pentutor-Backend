@@ -508,35 +508,38 @@ def tutor_applications(request):
 @permission_classes([IsAuthenticated])
 def update_application_status(request, application_id):
     try:
-        student_profile = StudentProfile.objects.get(user=request.user)
-        application = Application.objects.select_related("job", "job__student").get(
-            id=application_id
-        )
+        application = Application.objects.select_related("job").get(id=application_id)
+        job = application.job
+        user = request.user
 
-        if application.job.student != student_profile:
+        # Check if the logged-in user is the owner of the job (either student or employer)
+        is_student = job.student == user if job.student else False
+        is_employer = job.employer == user if job.employer else False
+
+        if not (is_student or is_employer):
             return Response(
                 {"success": False, "message": "Unauthorized access."}, status=403
             )
 
         new_status = request.data.get("status")
-        if new_status not in ["accepted", "rejected"]:
+        if new_status not in ["accepted", "pending", "rejected"]:
             return Response(
                 {"success": False, "message": "Invalid status."}, status=400
             )
 
         application.status = new_status
         application.save()
-        log_activity(request.user, f"Application {new_status}.")
+
+        log_activity(
+            user,
+            f"Application {new_status} by {'student' if is_student else 'employer'}.",
+        )
+
         return Response({"success": True, "message": f"Application {new_status}."})
 
     except Application.DoesNotExist:
         return Response(
             {"success": False, "message": "Application not found."}, status=404
-        )
-
-    except StudentProfile.DoesNotExist:
-        return Response(
-            {"success": False, "message": "Student profile not found."}, status=404
         )
 
 
@@ -1050,6 +1053,40 @@ def update_employer_profile(request):
 #         )
 #     except Exception as err:
 #         return Response({"success": False, "error": str(err)}, status=500)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def job_recommendation(request):
+    try:
+        tutor = TutorProfile.objects.get(user=request.user)
+    except TutorProfile.DoesNotExist:
+        return Response({"error": "Tutor profile not found."}, status=404)
+
+    tutor_subjects = set(tutor.subjects.values_list("name", flat=True))
+    tutor_city = tutor.city.lower() if tutor.city else ""
+
+    jobs = JobPost.objects.filter(status="approved")
+    recommendations = []
+
+    for job in jobs:
+        job_subjects = set(job.subjects.values_list("name", flat=True))
+        job_city = job.city.lower() if job.city else ""
+
+        match_score = len(tutor_subjects.intersection(job_subjects))
+
+        if tutor_city and tutor_city in job_city:
+            match_score += 1
+
+        if match_score > 0:
+            recommendations.append((job, match_score))
+
+    recommendations.sort(key=lambda x: x[1], reverse=True)
+
+    recommended_jobs = [job for job, _ in recommendations]
+    serialized = JobPostSerializer(recommended_jobs, many=True)
+
+    return Response(serialized.data)
 
 
 # Admin only APIs

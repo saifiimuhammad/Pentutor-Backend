@@ -33,6 +33,7 @@ PAYMENT_API_URL = (
     "https://sandbox.jazzcash.com.pk/CustomerPortal/transactionmanagement/merchantform/"
 )
 
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
@@ -64,6 +65,7 @@ INSTALLED_APPS = [
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
     "allauth.socialaccount.providers.apple",
+    "channels",
     "django_celery_beat",
     "accounts",
     "meetings",
@@ -233,3 +235,15 @@ GOOGLE_OAUTH2_CLIENT_SECRET = config(
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "accounts.CustomUser"
+
+
+ASGI_APPLICATION = "authentication.asgi.application"
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}

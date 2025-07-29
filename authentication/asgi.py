@@ -13,18 +13,22 @@ from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
 
-import whiteboard.routing  
-import alerts.routing
+import whiteboard
+import alerts
+import jobboard
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'authentication.settings')
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "authentication.settings")
 django.setup()
 
-application = ProtocolTypeRouter({
-    "http": get_asgi_application(),
-    "websocket": AuthMiddlewareStack(
-        URLRouter(
-            whiteboard.routing.websocket_urlpatterns,
-            alerts.routing.websocket_urlpatterns
-        )
-    ),
-})
+application = ProtocolTypeRouter(
+    {
+        "http": get_asgi_application(),
+        "websocket": AuthMiddlewareStack(
+            URLRouter(
+                whiteboard.routing.websocket_urlpatterns,
+                alerts.routing.websocket_urlpatterns,
+                jobboard.routing.websocket_urlpatterns,
+            )
+        ),
+    }
+)
