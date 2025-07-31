@@ -25,7 +25,10 @@ from .serializers import (
     ApplicationSerializer,
     EmployerSerializer,
     JobPostSerializer,
+    TutorProfileSerializer,
+    StudentProfileSerializer,
 )
+from .pagination import StandardPagination
 
 
 HOST_EMAIL = "muhammadsaifarain786@gmail.com"
@@ -202,15 +205,19 @@ def get_jobs_by_status(request):
     today = date.today()
 
     if status == "active":
-        jobs = JobPost.objects.filter(is_draft=False).filter(expiration_date__gte=today)
+        jobs = JobPost.objects.filter(is_draft=False, expiration_date__gte=today)
     elif status == "expired":
-        jobs = JobPost.objects.filter(is_draft=False).filter(expiration_date__lt=today)
+        jobs = JobPost.objects.filter(is_draft=False, expiration_date__lt=today)
     elif status == "draft":
         jobs = JobPost.objects.filter(is_draft=True)
     else:
         return Response({"success": False, "message": "Invalid status"})
 
-    return Response({"success": True, "jobs": JobPostSerializer(jobs, many=True).data})
+    paginator = StandardPagination()
+    paginated_jobs = paginator.paginate_queryset(jobs, request)
+    serialized = JobPostSerializer(paginated_jobs, many=True)
+
+    return paginator.get_paginated_response({"success": True, "jobs": serialized.data})
 
 
 @api_view(["POST"])
@@ -239,7 +246,11 @@ def toggle_save_job(request, job_id):
 @permission_classes([IsAuthenticated])
 def view_saved_jobs(request):
     profile = TutorProfile.objects.get(user=request.user)
-    saved_jobs = profile.saved_jobs.all()  # Assuming ManyToManyField in User model
+    saved_jobs = profile.saved_jobs.all().order_by("-created_at")
+
+    paginator = StandardPagination()
+    paginated_jobs = paginator.paginate_queryset(saved_jobs, request)
+
     data = [
         {
             "id": job.id,
@@ -247,16 +258,21 @@ def view_saved_jobs(request):
             "location": job.location,
             "posted_at": job.created_at,
         }
-        for job in saved_jobs
+        for job in paginated_jobs
     ]
-    return Response({"success": True, "jobs": data})
+
+    return paginator.get_paginated_response({"success": True, "jobs": data})
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def view_applied_jobs(request):
     profile = TutorProfile.objects.get(user=request.user)
-    applications = Application.objects.filter(tutor=profile)
+    applications = Application.objects.filter(tutor=profile).order_by("-created_at")
+
+    paginator = StandardPagination()
+    paginated_apps = paginator.paginate_queryset(applications, request)
+
     data = [
         {
             "job_id": app.job.id,
@@ -264,9 +280,10 @@ def view_applied_jobs(request):
             "status": app.status,
             "applied_on": app.created_at,
         }
-        for app in applications
+        for app in paginated_apps
     ]
-    return Response({"success": True, "applied_jobs": data})
+
+    return paginator.get_paginated_response({"success": True, "applied_jobs": data})
 
 
 @api_view(["GET"])
@@ -340,7 +357,6 @@ def job_list(request):
         job_type = request.GET.get("job_type")
         study_mode = request.GET.get("study_mode")
         search = request.GET.get("search")
-        page_number = request.GET.get("page", 1)
 
         jobs = JobPost.objects.all().order_by("-created_at")
 
@@ -361,36 +377,27 @@ def job_list(request):
                 Q(title__icontains=search) | Q(description__icontains=search)
             )
 
-        paginator = Paginator(jobs, 10)
-        page = paginator.get_page(page_number)
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(jobs, request)
 
-        job_data = []
-        for job in page:
-            job_data.append(
-                {
-                    "id": job.id,
-                    "title": job.title,
-                    "description": job.description,
-                    "contact": job.contact,
-                    "city": job.city,
-                    "job_type": job.job_type,
-                    "subjects": [s.name for s in job.subjects.all()],
-                    "student": job.student.user.username if job.student else None,
-                    "employer": job.employer.user.username if job.employer else None,
-                    "created_at": job.created_at.strftime("%Y-%m-%d %H:%M"),
-                    "study_mode": job.study_mode,
-                }
-            )
-
-        return Response(
+        job_data = [
             {
-                "success": True,
-                "jobs": job_data,
-                "page": page.number,
-                "total_pages": paginator.num_pages,
-                "total_jobs": paginator.count,
+                "id": job.id,
+                "title": job.title,
+                "description": job.description,
+                "contact": job.contact,
+                "city": job.city,
+                "job_type": job.job_type,
+                "subjects": [s.name for s in job.subjects.all()],
+                "student": job.student.user.username if job.student else None,
+                "employer": job.employer.user.username if job.employer else None,
+                "created_at": job.created_at.strftime("%Y-%m-%d %H:%M"),
+                "study_mode": job.study_mode,
             }
-        )
+            for job in page
+        ]
+
+        return paginator.get_paginated_response({"success": True, "jobs": job_data})
 
     except Exception as e:
         return Response({"success": False, "message": str(e)})
@@ -434,7 +441,6 @@ def apply_job(request, job_id):
 @permission_classes([IsAuthenticated])
 def student_applications(request):
     try:
-
         student_profile = StudentProfile.objects.get(user=request.user)
         job_id = request.GET.get("job_id")
 
@@ -443,12 +449,19 @@ def student_applications(request):
         else:
             jobs = JobPost.objects.filter(student=student_profile)
 
-        applications = Application.objects.filter(job__in=jobs).select_related(
-            "tutor", "job", "tutor__user"
+        applications = (
+            Application.objects.filter(job__in=jobs)
+            .select_related("tutor", "job", "tutor__user")
+            .prefetch_related("tutor__subjects")
+            .order_by("-applied_at")
         )
 
+        # Apply pagination
+        paginator = StandardPagination()
+        paginated_apps = paginator.paginate_queryset(applications, request)
+
         data = []
-        for app in applications:
+        for app in paginated_apps:
             data.append(
                 {
                     "job_id": app.job.id,
@@ -464,7 +477,7 @@ def student_applications(request):
                 }
             )
 
-        return Response({"success": True, "applications": data})
+        return paginator.get_paginated_response({"success": True, "applications": data})
 
     except StudentProfile.DoesNotExist:
         return Response(
@@ -477,12 +490,17 @@ def student_applications(request):
 def tutor_applications(request):
     try:
         tutor_profile = TutorProfile.objects.get(user=request.user)
-        applications = Application.objects.filter(tutor=tutor_profile).select_related(
-            "job", "job__student", "job__student__user"
+        applications = (
+            Application.objects.filter(tutor=tutor_profile)
+            .select_related("job", "job__student", "job__student__user")
+            .order_by("-applied_at")
         )
 
+        paginator = StandardPagination()
+        paginated_apps = paginator.paginate_queryset(applications, request)
+
         data = []
-        for app in applications:
+        for app in paginated_apps:
             data.append(
                 {
                     "job_id": app.job.id,
@@ -496,7 +514,7 @@ def tutor_applications(request):
                 }
             )
 
-        return Response({"success": True, "applications": data})
+        return paginator.get_paginated_response({"success": True, "applications": data})
 
     except TutorProfile.DoesNotExist:
         return Response(
@@ -543,50 +561,43 @@ def update_application_status(request, application_id):
         )
 
 
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def view_application_statuses(request):
-    try:
-        # Get all job applications for the current user
-        profile = TutorProfile.objects.get(user=request.user)
-        applications = Application.objects.filter(tutor=profile)
+# @api_view(["GET"])
+# @permission_classes([IsAuthenticated])
+# def view_application_statuses(request):
+#     try:
+#         profile = TutorProfile.objects.get(user=request.user)
+#         applications = Application.objects.filter(tutor=profile)
 
-        serializer = ApplicationSerializer(applications, many=True)
+#         serializer = ApplicationSerializer(applications, many=True)
 
-        return Response({"success": True, "applications": serializer.data})
+#         return Response({"success": True, "applications": serializer.data})
 
-    except Exception as e:
-        return Response({"success": False, "message": str(e)})
+#     except Exception as e:
+#         return Response({"success": False, "message": str(e)})
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_registered_tutors(request):
     try:
-        # Fetch tutors and prefetch related subjects + user
         tutors = (
             TutorProfile.objects.select_related("user")
             .prefetch_related("subjects")
             .all()
         )
 
-        # Plan priority based on TutorPayment choices
         plan_priority = {"PREMIUM": 1, "BASIC": 2, "FREE": 3}
 
-        # Sort tutors by plan (fetching plan from related user.payment_profile)
-        tutors = sorted(
+        sorted_tutors = sorted(
             tutors,
             key=lambda t: plan_priority.get(
                 getattr(t.user.payment_profile, "plan", "FREE"), 4
             ),
         )
 
-        # Pagination
-        page_number = request.GET.get("page", 1)
-        paginator = Paginator(tutors, 10)
-        page = paginator.get_page(page_number)
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(sorted_tutors, request)
 
-        # Prepare data
         data = []
         for tutor in page:
             data.append(
@@ -594,19 +605,11 @@ def get_registered_tutors(request):
                     "username": tutor.user.username,
                     "bio": tutor.bio,
                     "subjects": [s.name for s in tutor.subjects.all()],
-                    "plan": getattr(t.user.payment_profile, "plan", "FREE"),
+                    "plan": getattr(tutor.user.payment_profile, "plan", "FREE"),
                 }
             )
 
-        return Response(
-            {
-                "success": True,
-                "tutors": data,
-                "total_pages": paginator.num_pages,
-                "current_page": page.number,
-            },
-            status=200,
-        )
+        return paginator.get_paginated_response({"success": True, "tutors": data})
 
     except Exception as e:
         return Response({"success": False, "message": str(e)}, status=500)
@@ -619,9 +622,8 @@ def my_jobs(request):
         student_profile = StudentProfile.objects.get(user=request.user)
         jobs = JobPost.objects.filter(student=student_profile).order_by("-created_at")
 
-        page_number = request.GET.get("page", 1)
-        paginator = Paginator(jobs, 10)
-        page = paginator.get_page(page_number)
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(jobs, request)
 
         job_data = []
         for job in page:
@@ -639,14 +641,8 @@ def my_jobs(request):
                 }
             )
 
-        return Response(
-            {
-                "success": True,
-                "jobs": job_data,
-                "total_pages": paginator.num_pages,
-                "current_page": page.number,
-            }
-        )
+        return paginator.get_paginated_response({"success": True, "jobs": job_data})
+
     except StudentProfile.DoesNotExist:
         return Response(
             {"success": False, "message": "Student profile not found."}, status=404
@@ -862,6 +858,57 @@ def get_tutor(request, tutor_id):
         )
 
 
+@api_view(["PUT"])
+@permission_classes([IsAuthenticated])
+def update_tutor(request, tutor_id):
+    try:
+        tutor = TutorProfile.objects.get(id=tutor_id)
+
+        if tutor.user != request.user:
+            return Response({"success": False, "message": "Unauthorized."}, status=403)
+
+        serializer = TutorProfileSerializer(tutor, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    "success": True,
+                    "message": "Tutor profile updated successfully.",
+                    "tutor": serializer.data,
+                }
+            )
+        else:
+            return Response({"success": False, "errors": serializer.errors}, status=400)
+
+    except TutorProfile.DoesNotExist:
+        return Response({"success": False, "message": "Tutor not found."}, status=404)
+    except Exception as err:
+        return Response(
+            {"success": False, "message": "Update failed.", "error": str(err)},
+            status=500,
+        )
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_tutor(request, tutor_id):
+    try:
+        tutor = TutorProfile.objects.get(id=tutor_id)
+
+        if tutor.user != request.user:
+            return Response({"success": False, "message": "Unauthorized."}, status=403)
+
+        tutor.delete()
+        return Response({"success": True, "message": "Tutor profile deleted."})
+    except TutorProfile.DoesNotExist:
+        return Response({"success": False, "message": "Tutor not found."}, status=404)
+    except Exception as err:
+        return Response(
+            {"success": False, "message": "Error occurred.", "error": str(err)},
+            status=500,
+        )
+
+
 @api_view(["POST"])
 def login_student(request):
     try:
@@ -979,6 +1026,57 @@ def get_student(request, student_id):
         )
 
 
+@api_view(["PUT"])
+@permission_classes([IsAuthenticated])
+def update_student(request, student_id):
+    try:
+        student = StudentProfile.objects.get(id=student_id)
+
+        if student.user != request.user:
+            return Response({"success": False, "message": "Unauthorized."}, status=403)
+
+        serializer = StudentProfileSerializer(student, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    "success": True,
+                    "message": "Student profile updated.",
+                    "student": serializer.data,
+                }
+            )
+        return Response({"success": False, "errors": serializer.errors}, status=400)
+
+    except StudentProfile.DoesNotExist:
+        return Response({"success": False, "message": "Student not found."}, status=404)
+    except Exception as err:
+        return Response(
+            {"success": False, "message": "Update failed.", "error": str(err)},
+            status=500,
+        )
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_student(request, student_id):
+    try:
+        student = StudentProfile.objects.get(id=student_id)
+
+        if student.user != request.user:
+            return Response({"success": False, "message": "Unauthorized."}, status=403)
+
+        student.delete()
+        return Response({"success": True, "message": "Student profile deleted."})
+
+    except StudentProfile.DoesNotExist:
+        return Response({"success": False, "message": "Student not found."}, status=404)
+    except Exception as err:
+        return Response(
+            {"success": False, "message": "Delete failed.", "error": str(err)},
+            status=500,
+        )
+
+
 @api_view(["POST"])
 def create_employer_profile(request):
     try:
@@ -1005,6 +1103,17 @@ def create_employer_profile(request):
         return Response({"success": False, "message": str(e)}, status=500)
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_employer_profile(request):
+    try:
+        profile = EmployerProfile.objects.get(user=request.user)
+        serializer = EmployerSerializer(profile)
+        return Response({"success": True, "profile": serializer.data}, status=200)
+    except EmployerProfile.DoesNotExist:
+        return Response({"success": False, "message": "Profile not found."}, status=404)
+
+
 @api_view(["PUT"])
 @permission_classes([IsAuthenticated])
 def update_employer_profile(request):
@@ -1023,6 +1132,22 @@ def update_employer_profile(request):
             )
         return Response({"success": False, "errors": serializer.errors}, status=400)
 
+    except EmployerProfile.DoesNotExist:
+        return Response({"success": False, "message": "Profile not found."}, status=404)
+    except Exception as e:
+        return Response({"success": False, "message": str(e)}, status=500)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_employer_profile(request):
+    try:
+        profile = EmployerProfile.objects.get(user=request.user)
+        profile.delete()
+        log_activity(request.user, "Employer profile deleted")
+        return Response(
+            {"success": True, "message": "Employer profile deleted."}, status=200
+        )
     except EmployerProfile.DoesNotExist:
         return Response({"success": False, "message": "Profile not found."}, status=404)
     except Exception as e:
@@ -1084,9 +1209,14 @@ def job_recommendation(request):
     recommendations.sort(key=lambda x: x[1], reverse=True)
 
     recommended_jobs = [job for job, _ in recommendations]
-    serialized = JobPostSerializer(recommended_jobs, many=True)
 
-    return Response(serialized.data)
+    paginator = StandardPagination()
+    page = paginator.paginate_queryset(recommended_jobs, request)
+    serialized = JobPostSerializer(page, many=True)
+
+    return paginator.get_paginated_response(
+        {"success": True, "recommended_jobs": serialized.data}
+    )
 
 
 # Admin only APIs
@@ -1096,17 +1226,39 @@ def job_recommendation(request):
 @permission_classes([IsAdminUser])
 def view_all_users(request):
     try:
+        page_number = request.GET.get("page", 1)
+
         students = StudentProfile.objects.all().values()
         tutors = TutorProfile.objects.all().values()
         employers = EmployerProfile.objects.all().values()
 
+        student_paginator = Paginator(students, 10)
+        tutor_paginator = Paginator(tutors, 10)
+        employer_paginator = Paginator(employers, 10)
+
+        students_page = student_paginator.get_page(page_number)
+        tutors_page = tutor_paginator.get_page(page_number)
+        employers_page = employer_paginator.get_page(page_number)
+
         users = {
-            "students": list(students),
-            "tutors": list(tutors),
-            "employers": list(employers),
+            "students": list(students_page),
+            "tutors": list(tutors_page),
+            "employers": list(employers_page),
         }
 
-        return Response({"success": True, "users": users})
+        return Response(
+            {
+                "success": True,
+                "users": users,
+                "pagination": {
+                    "current_page": int(page_number),
+                    "total_student_pages": student_paginator.num_pages,
+                    "total_tutor_pages": tutor_paginator.num_pages,
+                    "total_employer_pages": employer_paginator.num_pages,
+                },
+            }
+        )
+
     except Exception as err:
         return Response({"success": False, "error": str(err)}, status=500)
 
@@ -1307,8 +1459,13 @@ def approve_reject_employer(request, employer_id):
 @permission_classes([IsAdminUser])
 def user_activity_list(request):
     activities = UserActivity.objects.all().order_by("-timestamp")
+
+    paginator = StandardPagination()
+    page = paginator.paginate_queryset(activities, request)
+
     data = [
         {"user": act.user.username, "action": act.action, "time": act.timestamp}
-        for act in activities
+        for act in page
     ]
-    return Response(data, status=200)
+
+    return paginator.get_paginated_response({"success": True, "activities": data})

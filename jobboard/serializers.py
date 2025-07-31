@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Application, EmployerProfile, JobPost
+from .models import Application, EmployerProfile, JobPost, TutorProfile, StudentProfile
 
 
 class ApplicationSerializer(serializers.ModelSerializer):
@@ -18,4 +18,16 @@ class EmployerSerializer(serializers.ModelSerializer):
 class JobPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = JobPost
-        fields = "__all__"  # or choose specific fields
+        fields = "__all__"
+
+
+class TutorProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TutorProfile
+        fields = "__all__"
+
+
+class StudentProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StudentProfile
+        fields = "__all__"
