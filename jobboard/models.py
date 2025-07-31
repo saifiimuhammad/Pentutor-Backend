@@ -102,13 +102,11 @@ class TutorProfile(models.Model):
     is_active = models.BooleanField(default=True)
     otp_code = models.CharField(max_length=6, null=True, blank=True)
     saved_jobs = models.ManyToManyField(JobPost, blank=True, related_name="saved_by")
-    cnic = models.CharField(max_length=15, null=True, blank=True)
-    cnic_front_image = models.ImageField(
+    cnic = models.CharField(max_length=15, default="XXXXX-XXXXXXX-X")
+    cnic_front = models.ImageField(
         upload_to=upload_to_cnic_front, blank=True, null=True
     )
-    cnic_back_image = models.ImageField(
-        upload_to=upload_to_cnic_back, blank=True, null=True
-    )
+    cnic_back = models.ImageField(upload_to=upload_to_cnic_back, blank=True, null=True)
 
     profile_image = models.ImageField(
         upload_to=upload_to_profile, blank=True, null=True
@@ -122,10 +120,12 @@ class TutorProfile(models.Model):
     email = models.EmailField(null=True, blank=True)
     mobile_number_1 = models.CharField(max_length=20, null=True, blank=True)
     mobile_number_2 = models.CharField(max_length=20, blank=True, null=True)
-
+    date_of_birth = models.DateField(null=True, blank=True)
     organization_name = models.CharField(max_length=255, blank=True, null=True)
     designation = models.CharField(max_length=100, blank=True, null=True)
     city = models.CharField(max_length=100, null=True, blank=True)
+    country = models.CharField(max_length=100, null=True, blank=True)
+    area = models.CharField(max_length=255, null=True, blank=True)
     location = models.CharField(max_length=100, blank=True, null=True)
     salary_package = models.CharField(max_length=100, blank=True, null=True)
     timings_required = models.CharField(max_length=100, blank=True, null=True)
@@ -315,3 +315,11 @@ class UserActivity(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.action}"
+
+
+class Notification(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    message = models.TextField()
+    url = models.URLField(blank=True, null=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)

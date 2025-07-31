@@ -29,6 +29,7 @@ from .serializers import (
     StudentProfileSerializer,
 )
 from .pagination import StandardPagination
+from .utils import send_notification
 
 
 HOST_EMAIL = "muhammadsaifarain786@gmail.com"
@@ -431,6 +432,12 @@ def apply_job(request, job_id):
         if serializer.is_valid():
             serializer.save(job=job, tutor=tutor_profile)
             log_activity(request.user, f"Applied to a Job post {job_id}")
+            send_notification(
+                user=job.student.user if job.student.user else job.employer.user,
+                subject="New Job Application",
+                message=f"{request.user.username} applied for {job.title}",
+                url=f"/dashboard/applications/{job.id}/",
+            )
             return Response(
                 {
                     "success": True,
@@ -564,6 +571,13 @@ def update_application_status(request, application_id):
         log_activity(
             user,
             f"Application {new_status} by {'student' if is_student else 'employer'}.",
+        )
+
+        send_notification(
+            user=application.tutor.user,
+            subject="Your Application Was Reviewed",
+            message=f"Your application for {application.job.title} was {status}",
+            url=f"/applications/{application.id}/",
         )
 
         return Response({"success": True, "message": f"Application {new_status}."})
@@ -721,9 +735,9 @@ def login_tutor(request):
 @api_view(["POST"])
 def register_tutor(request):
     try:
-        name = request.data.get("name")
+        full_name = request.data.get("full_name")
         email = request.data.get("email")
-        phone = request.data.get("phone")
+        mobile_number_1 = request.data.get("mobile_number_1")
         date_of_birth = request.data.get("date_of_birth")
         country = request.data.get("country")
         city = request.data.get("city")
@@ -735,9 +749,9 @@ def register_tutor(request):
         profile_image = request.FILES.get("profile_image")
 
         if (
-            not name
+            not full_name
             or not email
-            or not phone
+            or not mobile_number_1
             or not date_of_birth
             or not country
             or not city
@@ -762,9 +776,9 @@ def register_tutor(request):
             validate_file(file, name)
 
         tutor = TutorProfile.objects.create(
-            name=name,
+            full_name=full_name,
             email=email,
-            phone=phone,
+            mobile_number_1=mobile_number_1,
             date_of_birth=date_of_birth,
             country=country,
             city=city,
@@ -1251,14 +1265,14 @@ def job_recommendation(request):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+# @permission_classes([IsAdminUser])
 def view_all_users(request):
     try:
         page_number = request.GET.get("page", 1)
 
-        students = StudentProfile.objects.all().values()
-        tutors = TutorProfile.objects.all().values()
-        employers = EmployerProfile.objects.all().values()
+        students = StudentProfile.objects.all().values() or {}
+        tutors = TutorProfile.objects.all().values() or {}
+        employers = EmployerProfile.objects.all().values() or {}
 
         student_paginator = Paginator(students, 10)
         tutor_paginator = Paginator(tutors, 10)
