@@ -10,7 +10,7 @@ from datetime import date
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 
-from .helper import log_activity
+from .helper import log_activity, validate_file
 from .models import (
     StudentProfile,
     JobPost,
@@ -245,23 +245,34 @@ def toggle_save_job(request, job_id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def view_saved_jobs(request):
-    profile = TutorProfile.objects.get(user=request.user)
-    saved_jobs = profile.saved_jobs.all().order_by("-created_at")
+    try:
+        profile = TutorProfile.objects.get(user=request.user)
+        saved_jobs = profile.saved_jobs.all().order_by("-created_at")
 
-    paginator = StandardPagination()
-    paginated_jobs = paginator.paginate_queryset(saved_jobs, request)
+        paginator = StandardPagination()
+        paginated_jobs = paginator.paginate_queryset(saved_jobs, request)
 
-    data = [
-        {
-            "id": job.id,
-            "title": job.title,
-            "location": job.location,
-            "posted_at": job.created_at,
-        }
-        for job in paginated_jobs
-    ]
+        data = [
+            {
+                "id": job.id,
+                "title": job.title,
+                "location": job.location,
+                "posted_at": job.created_at,
+            }
+            for job in paginated_jobs
+        ]
 
-    return paginator.get_paginated_response({"success": True, "jobs": data})
+        return paginator.get_paginated_response({"success": True, "jobs": data})
+    except TutorProfile.DoesNotExist:
+        return Response(
+            {"success": False, "message": "Tutor profile not found."},
+            status=404,
+        )
+    except Exception as err:
+        return Response(
+            {"success": False, "message": "Something went wrong.", "error": str(err)},
+            status=500,
+        )
 
 
 @api_view(["GET"])
@@ -531,8 +542,10 @@ def update_application_status(request, application_id):
         user = request.user
 
         # Check if the logged-in user is the owner of the job (either student or employer)
-        is_student = job.student == user if job.student else False
-        is_employer = job.employer == user if job.employer else False
+        is_student = job.student and job.student.user == user if job.student else False
+        is_employer = (
+            job.employer and job.employer.user == user if job.employer else False
+        )
 
         if not (is_student or is_employer):
             return Response(
@@ -739,6 +752,14 @@ def register_tutor(request):
 
         if TutorProfile.objects.filter(cnic=cnic, email=email).exists():
             return Response({"success": False, "message": "Tutor already exists."})
+
+        for file, name in [
+            (cnic_front, "CNIC Front"),
+            (cnic_back, "CNIC Back"),
+            (degree_image, "Degree Image"),
+            (profile_image, "Profile Image"),
+        ]:
+            validate_file(file, name)
 
         tutor = TutorProfile.objects.create(
             name=name,
@@ -964,6 +985,13 @@ def register_student(request):
             if not data.get(field):
                 return Response({"success": False, "message": f"{field} is required."})
 
+        for file, name in [
+            (request.FILES.get("cnic_or_form_b_pic"), "CNIC or Form-B"),
+            (request.FILES.get("degree"), "Degree Image"),
+            (request.FILES.get("profile"), "Profile Image"),
+        ]:
+            validate_file(file, name)
+
         student_profile = StudentProfile.objects.create(
             user=request.user,
             name=data.get("name"),
@@ -984,7 +1012,7 @@ def register_student(request):
             profile=request.FILES.get("profile"),
         )
 
-        subject_ids = data.getlist("subjects")  # expects list of ids
+        subject_ids = data.getlist("subjects")
         if subject_ids:
             student_profile.subjects.set(Subject.objects.filter(id__in=subject_ids))
 
